@@ -4,7 +4,7 @@ export const GOOGLE_USER_INFO_URL = "https://www.googleapis.com/oauth2/v3/userin
 
 
 // 3. Sabke liye Open: "*"
-export const ADMIN_EMAILS = "pradipbade0@gmail.com, Sandesh.k0101@gmail.com"; 
+export const ADMIN_EMAILS = "*"; 
 
 export const DELETE_ACCESS = "pradipbade0@gmail.com, Sandesh.k0101@gmail.com"; 
 
@@ -22,3 +22,6 @@ export const TOUR_TYPE_COLORS = {
 };
 
 export const APP_HEADER = "EazyTour";
+
+
+VITE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxylpbTuzd699U78bGhblbNdc-M8gW3yxKZ5XbLEzzt45dBVUi7w52Y0FEKiVx0K2RX/exec";
