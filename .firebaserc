@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "paddy-easytour"
-  }
+  },
+  "targets": {
+    "paddy-easytour": {
+      "hosting": {
+        "main": [
+          "paddy-eazytour"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
