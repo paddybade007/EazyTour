@@ -21,4 +21,4 @@ export const TOUR_TYPE_COLORS = {
     "Others": "bg-purple-100 text-purple-800"
 };
 
-export const APP_HEADER = "EasyTour Cloud";
+export const APP_HEADER = "EazyTour";

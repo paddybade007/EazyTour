@@ -1,0 +1,54 @@
+/* Global hover utilities: subtle transitions for interactive elements */
+
+/* Apply smooth transitions to common interactive selectors */
+a, button, .btn, input[type="button"], input[type="submit"], .tour-btn, .card, .nav-link {
+  transition: color 0.18s ease, background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+/* Links get accent color on hover */
+a:hover {
+  color: var(--accent);
+  text-decoration: none;
+  transform: translateY(-2px);
+}
+
+/* Buttons and similar elements lift subtly */
+button:hover,
+.btn:hover,
+.tour-btn:hover,
+input[type="button"]:hover,
+input[type="submit"]:hover {
+  transform: translateY(-3px) scale(1.02);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  opacity: 0.98;
+}
+
+/* Generic card hover */
+.card {
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 14px 40px rgba(0,0,0,0.12);
+}
+
+/* Images get a subtle lift */
+/* img:hover {
+  transform: translateY(-3px) scale(1.01);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+} */
+
+/* Nav link hover */
+.nav-link:hover {
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+/* Focus-visible styles for accessibility */
+a:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
