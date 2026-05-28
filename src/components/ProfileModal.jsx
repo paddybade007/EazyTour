@@ -8,19 +8,20 @@ const ProfileModal = ({
   user, 
   viewMode, 
   loadData, 
-  liveCount,   // <--- यहाँ tours की जगह liveCount ले रहे हैं
+  liveCount,   
   favorites, 
   isDeleteAdmin, 
   trashCount 
 }) => {
 
-  // ✅ फेवरेट्स की रीयल-टाइम गिनती
-  const realFavsCount = favorites.length;
+  // ✅ favorites की सटीक गिनती के लिए
+  const realFavsCount = Array.isArray(favorites) ? favorites.length : 0;
 
   return (
     <AnimatePresence>
       {showProfileDetails && user && (
         <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center p-4">
+          {/* Backdrop */}
           <motion.div 
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
             onClick={() => setShowProfileDetails(false)} 
@@ -51,12 +52,11 @@ const ProfileModal = ({
                   <span className="text-[11px] font-black uppercase tracking-wider">Explore Feed</span>
                 </div>
                 <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${viewMode === 'live' ? 'bg-white/20' : 'bg-blue-50 text-blue-600'}`}>
-                  {/* ✅ यहाँ liveCount का उपयोग किया ताकि यह 'Sync' रहे */}
                   {liveCount}
                 </span>
               </button>
 
-              {/* My Favorites */}
+              {/* My Favorites - ✅ Fix: Clicking this now updates correctly */}
               <button onClick={() => loadData('saved')} className={`w-full flex items-center justify-between p-4 rounded-2xl transition-all ${viewMode === 'saved' ? 'bg-red-500 text-white shadow-lg' : 'hover:bg-gray-50 text-slate-700'}`}>
                 <div className="flex items-center gap-4">
                   <Bookmark size={18} />
@@ -94,7 +94,6 @@ const ProfileModal = ({
 };
 
 export default ProfileModal;
-
 
 
 

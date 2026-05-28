@@ -4,7 +4,7 @@ export const GOOGLE_USER_INFO_URL = "https://www.googleapis.com/oauth2/v3/userin
 
 
 // 3. Sabke liye Open: "*"
-export const ADMIN_EMAILS = "pradipbade0@gmail.com, Sandesh.k0101@gmail.com"; 
+export const ADMIN_EMAILS = "*"; 
 
 export const DELETE_ACCESS = "pradipbade0@gmail.com, Sandesh.k0101@gmail.com"; 
 
