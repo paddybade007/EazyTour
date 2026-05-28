@@ -22,3 +22,6 @@ export const TOUR_TYPE_COLORS = {
 };
 
 export const APP_HEADER = "EazyTour";
+
+
+VITE_SHEET_API_URL = "https://script.google.com/macros/s/AKfycbxylpbTuzd699U78bGhblbNdc-M8gW3yxKZ5XbLEzzt45dBVUi7w52Y0FEKiVx0K2RX/exec";

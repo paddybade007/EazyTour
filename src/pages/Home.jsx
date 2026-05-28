@@ -1,3 +1,304 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { MapPin, Search, Compass, Plus, Star, Heart, Loader2, LogOut, LogIn, Trash2, RotateCcw, Box, X, ShieldCheck, Bookmark, Layout, RefreshCcw, Settings, UserCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import Header from '../components/Header';
+import ProfileModal from '../components/ProfileModal';
+import RestoreConfirmModal from '../components/RestoreConfirmModal';
+import DeleteConfirmModal from '../components/DeleteConfirmModal';
+import CloudActionLoader from '../components/CloudActionLoader';
+import PermDeleteModal from '../components/PermDeleteModal';
+import CloudSuccessToast from '../components/CloudSuccessToast';
+import BottomNav from '../components/BottomNav';
+import ImageSlider from '../components/ImageSlider'; 
+
+
+const SHEET_API_URL = import.meta.env.VITE_SHEET_API_URL;
+
+const Home = () => {
+  const navigate = useNavigate();
+  const [tours, setTours] = useState([]);
+  const [liveCount, setLiveCount] = useState(0); 
+  const [user, setUser] = useState(null);
+  const [trashCount, setTrashCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [location, setLocation] = useState("Detecting...");
+  const [coords, setCoords] = useState({ lat: 19.0760, lon: 72.8777 });
+  const [loadingLoc, setLoadingLoc] = useState(true);
+  const [activeTab, setActiveTab] = useState("All");
+  const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState("live");
+  const [favorites, setFavorites] = useState([]);
+  const [showProfileDetails, setShowProfileDetails] = useState(false);
+  const [itemToRestore, setItemToRestore] = useState(null);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [globalActionLoading, setGlobalActionLoading] = useState(false);
+  const [itemToPermDelete, setItemToPermDelete] = useState(null);
+  const [toastMsg, setToastMsg] = useState("");
+
+  const [settings, setSettings] = useState({
+    APP_HEADER: "EasyTour Cloud",
+    SEARCH_PLACEHOLDER: "Loading Explorer...",
+    ADMIN_EMAILS: "",
+    DELETE_ACCESS: "",
+    TOUR_TYPES: ["All"],
+    TOUR_TYPE_COLORS: {}
+  });
+
+  const isAdmin = useMemo(() => {
+    if (settings.ADMIN_EMAILS === "*") return true;
+    if (!user || !settings.ADMIN_EMAILS) return false;
+    return settings.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()).includes(user.email.toLowerCase());
+  }, [user, settings]);
+
+  const isDeleteAdmin = useMemo(() => {
+    if (!user || !settings.DELETE_ACCESS) return false;
+    return settings.DELETE_ACCESS.split(',').map(e => e.trim().toLowerCase()).includes(user.email.toLowerCase());
+  }, [user, settings]);
+
+  const fetchConfigs = async () => {
+    try {
+      const res = await fetch(`${SHEET_API_URL}?mode=configs`);
+      const data = await res.json();
+      const configMap = {};
+      data.forEach(item => { configMap[item.key] = item.value; });
+      if (configMap.TOUR_TYPE_COLORS) configMap.TOUR_TYPE_COLORS = JSON.parse(configMap.TOUR_TYPE_COLORS.replace(/;/g, ''));
+      if (configMap.TOUR_TYPES) configMap.TOUR_TYPES = configMap.TOUR_TYPES.split(',').map(t => t.trim());
+      setSettings(prev => ({ ...prev, ...configMap }));
+    } catch (e) { console.log(e); }
+  };
+
+  const fetchLoc = () => {
+    setLoadingLoc(true);
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude, longitude } = pos.coords;
+      setCoords({ lat: latitude, lon: longitude });
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+        const d = await res.json();
+        const area = d.address.suburb || d.address.neighbourhood || d.address.city || "Mumbai";
+        setLocation(area);
+      } catch (e) { setLocation("Mumbai, MH"); }
+      setLoadingLoc(false);
+    }, () => { setLocation("Mumbai, MH"); setLoadingLoc(false); });
+  };
+
+  const loadData = async (mode) => {
+    setViewMode(mode);
+    setShowProfileDetails(false);
+    if (mode === "map") {
+      setLoading(false);
+      return;
+    }
+    try {
+      setLoading(true);
+      const apiMode = mode === 'trash' ? 'trash' : 'live';
+      const res = await fetch(`${SHEET_API_URL}?mode=${apiMode}`);
+      const data = await res.json();
+      const validData = Array.isArray(data) ? data.filter(t => t.id) : [];
+      setTours(validData);
+      
+      if (apiMode === 'live') setLiveCount(validData.length);
+    } catch (err) { 
+      setTours([]); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
+
+  const syncTrash = async () => {
+    try {
+      const res = await fetch(`${SHEET_API_URL}?mode=trash`);
+      const data = await res.json();
+      setTrashCount(data.filter(t => t.id).length);
+    } catch (e) { setTrashCount(0); }
+  };
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) setUser(JSON.parse(savedUser));
+    fetchConfigs();
+    fetchLoc();
+    loadData("live");
+    syncTrash();
+  }, []);
+
+  useEffect(() => {
+    if (user) setFavorites(JSON.parse(localStorage.getItem(`favs_${user.email}`)) || []);
+  }, [user]);
+
+  const filtered = useMemo(() => {
+    let list = viewMode === "saved" ? tours.filter(t => favorites.includes(t.id)) : tours;
+    const seenIds = new Set();
+    return (list || []).filter(t => {
+      if (!t.id || seenIds.has(t.id)) return false; 
+      seenIds.add(t.id);
+      const matchesTab = activeTab === "All" || t.type === activeTab;
+      const matchesSearch = String(t.name || "").toLowerCase().includes(search.toLowerCase()) || 
+                           String(t.loc || "").toLowerCase().includes(search.toLowerCase());
+      return matchesTab && matchesSearch;
+    });
+  }, [activeTab, search, tours, viewMode, favorites]);
+
+  const handleQuickUpload = async (e, tour) => {
+    // ✋ Click propagation rokne ki zarurat yahan nahi hai par safe rahne ke liye label par lagayenge
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+    setGlobalActionLoading(true);
+    try {
+      const imagePromises = files.map(file => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = () => resolve({ base64: reader.result, mimeType: file.type });
+        });
+      });
+      const processedImages = await Promise.all(imagePromises);
+      await fetch(SHEET_API_URL, { 
+        method: 'POST', 
+        body: JSON.stringify({ ...tour, action: "save", isSystemAdmin: true, imageFiles: processedImages, adminUserEmail: user?.email }) 
+      });
+      setToastMsg(`Uploading Gallery...`);
+      loadData("live");
+    } catch (err) { setToastMsg("Cloud Fail"); }
+    finally { setGlobalActionLoading(false); }
+  };
+
+  const handleExecuteAction = async (action, id, itemName) => {
+    setGlobalActionLoading(true);
+    try {
+      await fetch(SHEET_API_URL, { method: 'POST', body: JSON.stringify({ action, id }) });
+      setToastMsg(`${itemName} Done`);
+      await loadData(viewMode === 'trash' ? 'trash' : 'live');
+      syncTrash();
+    } catch (err) { setToastMsg("Operation Fail"); }
+    finally { setGlobalActionLoading(false); }
+  };
+
+  const toggleFavorite = (e, id) => {
+    e.stopPropagation();
+    if (!user) return;
+    let updatedFavs = favorites.includes(id) ? favorites.filter(f => f !== id) : [...favorites, id];
+    setFavorites(updatedFavs);
+    localStorage.setItem(`favs_${user.email}`, JSON.stringify(updatedFavs));
+  };
+
+  return (
+    <div className="min-h-screen bg-white pb-24 font-sans text-slate-900 overflow-x-hidden">
+      <CloudSuccessToast message={toastMsg} isOpen={!!toastMsg} onClose={() => setToastMsg("")} />
+
+      <Header settings={settings} location={location} loadingLoc={loadingLoc} fetchLoc={fetchLoc} isAdmin={isAdmin} viewMode={viewMode} user={user} setShowProfileDetails={setShowProfileDetails} />
+
+      <main className="max-w-6xl mx-auto px-4 pt-6">
+        {viewMode === "map" ? (
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col h-[70vh]">
+            <div className="flex-1 rounded-[40px] overflow-hidden border-4 border-white shadow-2xl relative bg-slate-50">
+               <button onClick={() => loadData('live')} className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur-sm px-4 py-2 rounded-xl shadow-md text-[10px] font-black uppercase">Exit Radar ✕</button>
+               <iframe width="100%" height="100%" frameBorder="0" src={`https://maps.google.com/maps?q=${coords.lat},${coords.lon}&z=14&output=embed`} />
+            </div>
+          </motion.div>
+        ) : (
+          <>
+            {viewMode === "trash" && <div className="mb-4 bg-orange-50 p-4 rounded-2xl border border-orange-100 font-black text-xs uppercase text-orange-600 flex items-center gap-2"><Trash2 size={16}/>Recycle Bin ({trashCount})</div>}
+            {viewMode === "saved" && <div className="mb-4 flex items-center gap-2 text-red-600 font-black px-2 uppercase tracking-tighter text-xl"><Heart size={22} fill="red" /> My Collections ({favorites.length})</div>}
+
+            <div className="mb-4 flex items-center bg-gray-50 p-3.5 rounded-2xl border border-gray-100 focus-within:bg-white transition-all shadow-inner">
+                <Search className="text-gray-300 mr-2" size={18} />
+                <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder={settings.SEARCH_PLACEHOLDER} className="bg-transparent outline-none w-full text-xs font-black uppercase" />
+            </div>
+
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-6 py-1">
+              {(settings.TOUR_TYPES || []).map(tab => (
+                <button key={tab} onClick={() => setActiveTab(tab)}
+                  className={`px-5 py-2 rounded-xl whitespace-nowrap text-[10px] font-black uppercase transition-all shadow-sm ${activeTab === tab ? (settings.TOUR_TYPE_COLORS?.[tab] || 'bg-slate-900 text-white') : 'bg-white text-gray-400 border border-gray-100'}`}
+                >{tab}</button>
+              ))}
+            </div>
+
+            {loading ? (
+              <div className="py-24 text-center">
+                <Loader2 className="animate-spin text-blue-600 mx-auto" size={32} />
+                <p className="text-[9px] font-black text-gray-400 uppercase mt-4 animate-pulse">
+                   {viewMode === 'saved' ? "Opening Your Collections..." : "Communicating with Cloud..."}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {filtered.map(t => (
+                  <div key={t.id} onClick={() => viewMode === "live" && navigate(`/details/${t.id}`)} className="relative aspect-square rounded-[28px] overflow-hidden active:scale-[0.96] transition-all bg-gray-50 border border-gray-100 group shadow-sm">
+                    {/* <div className="w-full h-full"><ImageSlider images={t.images?.length > 0 ? t.images : [t.img]} /></div> */}
+                    <div className="w-full h-full"><ImageSlider images={t.images?.length > 0 ? t.images : [t.img]} /></div> 
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent pointer-events-none" />
+                    
+                    <div className="absolute top-2.5 right-2.5 flex flex-col gap-1.5 z-20">
+                      {viewMode === "live" && isAdmin && (
+                        /* ✅ FIXED: label click will NOT open details page now */
+                        <label 
+                          onClick={(e) => e.stopPropagation()} 
+                          className="h-8 w-8 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-lg active:scale-75 cursor-pointer"
+                        >
+                          <Plus size={16} strokeWidth={3} />
+                          <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleQuickUpload(e, t)} />
+                        </label>
+                      )}
+                      {viewMode === "live" && isDeleteAdmin && (
+                        <button onClick={(e) => { e.stopPropagation(); setItemToDelete(t); }} className="h-8 w-8 bg-red-600 text-white rounded-lg flex items-center justify-center"><Trash2 size={12} /></button>
+                      )}
+                      {viewMode === "trash" && isDeleteAdmin && (
+                        <>
+                          <button onClick={(e) => { e.stopPropagation(); setItemToRestore(t); }} className="h-8 w-8 bg-blue-500 text-white rounded-lg flex items-center justify-center"><RotateCcw size={12}/></button>
+                          <button onClick={(e) => { e.stopPropagation(); setItemToPermDelete(t); }} className="h-8 w-8 bg-red-800 text-white rounded-lg flex items-center justify-center"><Trash2 size={12}/></button>
+                        </>
+                      )}
+                      {viewMode !== "trash" && (
+                        <button onClick={(e) => toggleFavorite(e, t.id)} className="h-8 w-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center">
+                          <Heart size={14} className={favorites.includes(t.id) ? "text-red-500 fill-red-500 shadow-xl" : "text-white opacity-70"} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="absolute top-2.5 left-2.5 bg-white/95 px-2 py-0.5 rounded-md shadow-sm border border-gray-100 text-[8px] font-black">★ {t.rating}</div>
+                    <div className="absolute bottom-3 left-3 right-3 text-white pointer-events-none z-10 leading-none">
+                      <h3 className="text-[10px] md:text-xs font-black truncate uppercase tracking-tighter mb-1">{t.name}</h3>
+                      <div className="flex justify-between items-center opacity-70 leading-none">
+                        <span className="text-[8px] flex items-center gap-0.5 truncate max-w-[65%] uppercase"><MapPin size={7} />{t.loc?.split(',')[0]}</span>
+                        <span className="text-[10px] font-black text-blue-400">₹{t.price}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      <ProfileModal 
+        showProfileDetails={showProfileDetails} setShowProfileDetails={setShowProfileDetails} 
+        user={user} viewMode={viewMode} loadData={loadData} liveCount={liveCount}
+        tours={tours} favorites={favorites} isDeleteAdmin={isDeleteAdmin} trashCount={trashCount} 
+      />
+
+      <DeleteConfirmModal isOpen={!!itemToDelete} onClose={() => setItemToDelete(null)} onConfirm={() => handleExecuteAction('delete', itemToDelete.id, itemToDelete.name)} itemName={itemToDelete?.name} />
+      <RestoreConfirmModal isOpen={!!itemToRestore} onClose={() => setItemToRestore(null)} onConfirm={() => handleExecuteAction('restore', itemToRestore.id, itemToRestore.name)} itemName={itemToRestore?.name} />
+      <PermDeleteModal isOpen={!!itemToPermDelete} onClose={() => setItemToPermDelete(null)} onConfirm={() => handleExecuteAction('permanentDelete', itemToPermDelete.id, itemToPermDelete.name)} itemName={itemToPermDelete?.name}/>
+
+      {globalActionLoading && <CloudActionLoader />}
+
+      <BottomNav viewMode={viewMode} loadData={loadData} user={user} setShowProfileDetails={setShowProfileDetails} />
+    </div>
+  );
+};
+
+export default Home;
+
+
+
+
+
+
+
+
 // import React, { useState, useEffect, useMemo } from 'react';
 // import { MapPin, Search, Compass, Plus, Star, Heart, Loader2, LogOut, LogIn, Trash2, RotateCcw, Box, X, ShieldCheck, Bookmark, Layout, RefreshCcw, Settings, UserCircle } from 'lucide-react';
 // import { useNavigate } from 'react-router-dom';
@@ -470,300 +771,3 @@
 // };
 
 // export default Home;
-
-
-
-
-import React, { useState, useEffect, useMemo } from 'react';
-import { MapPin, Search, Compass, Plus, Star, Heart, Loader2, LogOut, LogIn, Trash2, RotateCcw, Box, X, ShieldCheck, Bookmark, Layout, RefreshCcw, Settings, UserCircle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import Header from '../components/Header';
-import ProfileModal from '../components/ProfileModal';
-import RestoreConfirmModal from '../components/RestoreConfirmModal';
-import DeleteConfirmModal from '../components/DeleteConfirmModal';
-import CloudActionLoader from '../components/CloudActionLoader';
-import PermDeleteModal from '../components/PermDeleteModal';
-import CloudSuccessToast from '../components/CloudSuccessToast';
-import BottomNav from '../components/BottomNav';
-import ImageSlider from '../components/ImageSlider'; 
-
-
-const SHEET_API_URL = import.meta.env.VITE_SHEET_API_URL;
-
-const Home = () => {
-  const navigate = useNavigate();
-  const [tours, setTours] = useState([]);
-  const [liveCount, setLiveCount] = useState(0); 
-  const [user, setUser] = useState(null);
-  const [trashCount, setTrashCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [location, setLocation] = useState("Detecting...");
-  const [coords, setCoords] = useState({ lat: 19.0760, lon: 72.8777 });
-  const [loadingLoc, setLoadingLoc] = useState(true);
-  const [activeTab, setActiveTab] = useState("All");
-  const [search, setSearch] = useState("");
-  const [viewMode, setViewMode] = useState("live");
-  const [favorites, setFavorites] = useState([]);
-  const [showProfileDetails, setShowProfileDetails] = useState(false);
-  const [itemToRestore, setItemToRestore] = useState(null);
-  const [itemToDelete, setItemToDelete] = useState(null);
-  const [globalActionLoading, setGlobalActionLoading] = useState(false);
-  const [itemToPermDelete, setItemToPermDelete] = useState(null);
-  const [toastMsg, setToastMsg] = useState("");
-
-  const [settings, setSettings] = useState({
-    APP_HEADER: "EasyTour Cloud",
-    SEARCH_PLACEHOLDER: "Loading Explorer...",
-    ADMIN_EMAILS: "",
-    DELETE_ACCESS: "",
-    TOUR_TYPES: ["All"],
-    TOUR_TYPE_COLORS: {}
-  });
-
-  const isAdmin = useMemo(() => {
-    if (settings.ADMIN_EMAILS === "*") return true;
-    if (!user || !settings.ADMIN_EMAILS) return false;
-    return settings.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()).includes(user.email.toLowerCase());
-  }, [user, settings]);
-
-  const isDeleteAdmin = useMemo(() => {
-    if (!user || !settings.DELETE_ACCESS) return false;
-    return settings.DELETE_ACCESS.split(',').map(e => e.trim().toLowerCase()).includes(user.email.toLowerCase());
-  }, [user, settings]);
-
-  const fetchConfigs = async () => {
-    try {
-      const res = await fetch(`${SHEET_API_URL}?mode=configs`);
-      const data = await res.json();
-      const configMap = {};
-      data.forEach(item => { configMap[item.key] = item.value; });
-      if (configMap.TOUR_TYPE_COLORS) configMap.TOUR_TYPE_COLORS = JSON.parse(configMap.TOUR_TYPE_COLORS.replace(/;/g, ''));
-      if (configMap.TOUR_TYPES) configMap.TOUR_TYPES = configMap.TOUR_TYPES.split(',').map(t => t.trim());
-      setSettings(prev => ({ ...prev, ...configMap }));
-    } catch (e) { console.log(e); }
-  };
-
-  const fetchLoc = () => {
-    setLoadingLoc(true);
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const { latitude, longitude } = pos.coords;
-      setCoords({ lat: latitude, lon: longitude });
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
-        const d = await res.json();
-        const area = d.address.suburb || d.address.neighbourhood || d.address.city || "Mumbai";
-        setLocation(area);
-      } catch (e) { setLocation("Mumbai, MH"); }
-      setLoadingLoc(false);
-    }, () => { setLocation("Mumbai, MH"); setLoadingLoc(false); });
-  };
-
-  const loadData = async (mode) => {
-    setViewMode(mode);
-    setShowProfileDetails(false);
-    if (mode === "map") {
-      setLoading(false);
-      return;
-    }
-    try {
-      setLoading(true);
-      const apiMode = mode === 'trash' ? 'trash' : 'live';
-      const res = await fetch(`${SHEET_API_URL}?mode=${apiMode}`);
-      const data = await res.json();
-      const validData = Array.isArray(data) ? data.filter(t => t.id) : [];
-      setTours(validData);
-      
-      if (apiMode === 'live') setLiveCount(validData.length);
-    } catch (err) { 
-      setTours([]); 
-    } finally { 
-      setLoading(false); 
-    }
-  };
-
-  const syncTrash = async () => {
-    try {
-      const res = await fetch(`${SHEET_API_URL}?mode=trash`);
-      const data = await res.json();
-      setTrashCount(data.filter(t => t.id).length);
-    } catch (e) { setTrashCount(0); }
-  };
-
-  useEffect(() => {
-    const savedUser = localStorage.getItem('user');
-    if (savedUser) setUser(JSON.parse(savedUser));
-    fetchConfigs();
-    fetchLoc();
-    loadData("live");
-    syncTrash();
-  }, []);
-
-  useEffect(() => {
-    if (user) setFavorites(JSON.parse(localStorage.getItem(`favs_${user.email}`)) || []);
-  }, [user]);
-
-  const filtered = useMemo(() => {
-    let list = viewMode === "saved" ? tours.filter(t => favorites.includes(t.id)) : tours;
-    const seenIds = new Set();
-    return (list || []).filter(t => {
-      if (!t.id || seenIds.has(t.id)) return false; 
-      seenIds.add(t.id);
-      const matchesTab = activeTab === "All" || t.type === activeTab;
-      const matchesSearch = String(t.name || "").toLowerCase().includes(search.toLowerCase()) || 
-                           String(t.loc || "").toLowerCase().includes(search.toLowerCase());
-      return matchesTab && matchesSearch;
-    });
-  }, [activeTab, search, tours, viewMode, favorites]);
-
-  const handleQuickUpload = async (e, tour) => {
-    // ✋ Click propagation rokne ki zarurat yahan nahi hai par safe rahne ke liye label par lagayenge
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-    setGlobalActionLoading(true);
-    try {
-      const imagePromises = files.map(file => {
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.readAsDataURL(file);
-          reader.onload = () => resolve({ base64: reader.result, mimeType: file.type });
-        });
-      });
-      const processedImages = await Promise.all(imagePromises);
-      await fetch(SHEET_API_URL, { 
-        method: 'POST', 
-        body: JSON.stringify({ ...tour, action: "save", isSystemAdmin: true, imageFiles: processedImages, adminUserEmail: user?.email }) 
-      });
-      setToastMsg(`Uploading Gallery...`);
-      loadData("live");
-    } catch (err) { setToastMsg("Cloud Fail"); }
-    finally { setGlobalActionLoading(false); }
-  };
-
-  const handleExecuteAction = async (action, id, itemName) => {
-    setGlobalActionLoading(true);
-    try {
-      await fetch(SHEET_API_URL, { method: 'POST', body: JSON.stringify({ action, id }) });
-      setToastMsg(`${itemName} Done`);
-      await loadData(viewMode === 'trash' ? 'trash' : 'live');
-      syncTrash();
-    } catch (err) { setToastMsg("Operation Fail"); }
-    finally { setGlobalActionLoading(false); }
-  };
-
-  const toggleFavorite = (e, id) => {
-    e.stopPropagation();
-    if (!user) return;
-    let updatedFavs = favorites.includes(id) ? favorites.filter(f => f !== id) : [...favorites, id];
-    setFavorites(updatedFavs);
-    localStorage.setItem(`favs_${user.email}`, JSON.stringify(updatedFavs));
-  };
-
-  return (
-    <div className="min-h-screen bg-white pb-24 font-sans text-slate-900 overflow-x-hidden">
-      <CloudSuccessToast message={toastMsg} isOpen={!!toastMsg} onClose={() => setToastMsg("")} />
-
-      <Header settings={settings} location={location} loadingLoc={loadingLoc} fetchLoc={fetchLoc} isAdmin={isAdmin} viewMode={viewMode} user={user} setShowProfileDetails={setShowProfileDetails} />
-
-      <main className="max-w-6xl mx-auto px-4 pt-6">
-        {viewMode === "map" ? (
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col h-[70vh]">
-            <div className="flex-1 rounded-[40px] overflow-hidden border-4 border-white shadow-2xl relative bg-slate-50">
-               <button onClick={() => loadData('live')} className="absolute top-4 right-4 z-10 bg-white/90 backdrop-blur-sm px-4 py-2 rounded-xl shadow-md text-[10px] font-black uppercase">Exit Radar ✕</button>
-               <iframe width="100%" height="100%" frameBorder="0" src={`https://maps.google.com/maps?q=${coords.lat},${coords.lon}&z=14&output=embed`} />
-            </div>
-          </motion.div>
-        ) : (
-          <>
-            {viewMode === "trash" && <div className="mb-4 bg-orange-50 p-4 rounded-2xl border border-orange-100 font-black text-xs uppercase text-orange-600 flex items-center gap-2"><Trash2 size={16}/>Recycle Bin ({trashCount})</div>}
-            {viewMode === "saved" && <div className="mb-4 flex items-center gap-2 text-red-600 font-black px-2 uppercase tracking-tighter text-xl"><Heart size={22} fill="red" /> My Collections ({favorites.length})</div>}
-
-            <div className="mb-4 flex items-center bg-gray-50 p-3.5 rounded-2xl border border-gray-100 focus-within:bg-white transition-all shadow-inner">
-                <Search className="text-gray-300 mr-2" size={18} />
-                <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder={settings.SEARCH_PLACEHOLDER} className="bg-transparent outline-none w-full text-xs font-black uppercase" />
-            </div>
-
-            <div className="flex gap-1.5 overflow-x-auto no-scrollbar mb-6 py-1">
-              {(settings.TOUR_TYPES || []).map(tab => (
-                <button key={tab} onClick={() => setActiveTab(tab)}
-                  className={`px-5 py-2 rounded-xl whitespace-nowrap text-[10px] font-black uppercase transition-all shadow-sm ${activeTab === tab ? (settings.TOUR_TYPE_COLORS?.[tab] || 'bg-slate-900 text-white') : 'bg-white text-gray-400 border border-gray-100'}`}
-                >{tab}</button>
-              ))}
-            </div>
-
-            {loading ? (
-              <div className="py-24 text-center">
-                <Loader2 className="animate-spin text-blue-600 mx-auto" size={32} />
-                <p className="text-[9px] font-black text-gray-400 uppercase mt-4 animate-pulse">
-                   {viewMode === 'saved' ? "Opening Your Collections..." : "Communicating with Cloud..."}
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {filtered.map(t => (
-                  <div key={t.id} onClick={() => viewMode === "live" && navigate(`/details/${t.id}`)} className="relative aspect-square rounded-[28px] overflow-hidden active:scale-[0.96] transition-all bg-gray-50 border border-gray-100 group shadow-sm">
-                    {/* <div className="w-full h-full"><ImageSlider images={t.images?.length > 0 ? t.images : [t.img]} /></div> */}
-                    <div className="w-full h-full"><ImageSlider images={t.images?.length > 0 ? t.images : [t.img]} /></div> 
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent pointer-events-none" />
-                    
-                    <div className="absolute top-2.5 right-2.5 flex flex-col gap-1.5 z-20">
-                      {viewMode === "live" && isAdmin && (
-                        /* ✅ FIXED: label click will NOT open details page now */
-                        <label 
-                          onClick={(e) => e.stopPropagation()} 
-                          className="h-8 w-8 bg-blue-600 text-white rounded-lg flex items-center justify-center shadow-lg active:scale-75 cursor-pointer"
-                        >
-                          <Plus size={16} strokeWidth={3} />
-                          <input type="file" multiple accept="image/*" className="hidden" onChange={(e) => handleQuickUpload(e, t)} />
-                        </label>
-                      )}
-                      {viewMode === "live" && isDeleteAdmin && (
-                        <button onClick={(e) => { e.stopPropagation(); setItemToDelete(t); }} className="h-8 w-8 bg-red-600 text-white rounded-lg flex items-center justify-center"><Trash2 size={12} /></button>
-                      )}
-                      {viewMode === "trash" && isDeleteAdmin && (
-                        <>
-                          <button onClick={(e) => { e.stopPropagation(); setItemToRestore(t); }} className="h-8 w-8 bg-blue-500 text-white rounded-lg flex items-center justify-center"><RotateCcw size={12}/></button>
-                          <button onClick={(e) => { e.stopPropagation(); setItemToPermDelete(t); }} className="h-8 w-8 bg-red-800 text-white rounded-lg flex items-center justify-center"><Trash2 size={12}/></button>
-                        </>
-                      )}
-                      {viewMode !== "trash" && (
-                        <button onClick={(e) => toggleFavorite(e, t.id)} className="h-8 w-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center">
-                          <Heart size={14} className={favorites.includes(t.id) ? "text-red-500 fill-red-500 shadow-xl" : "text-white opacity-70"} />
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="absolute top-2.5 left-2.5 bg-white/95 px-2 py-0.5 rounded-md shadow-sm border border-gray-100 text-[8px] font-black">★ {t.rating}</div>
-                    <div className="absolute bottom-3 left-3 right-3 text-white pointer-events-none z-10 leading-none">
-                      <h3 className="text-[10px] md:text-xs font-black truncate uppercase tracking-tighter mb-1">{t.name}</h3>
-                      <div className="flex justify-between items-center opacity-70 leading-none">
-                        <span className="text-[8px] flex items-center gap-0.5 truncate max-w-[65%] uppercase"><MapPin size={7} />{t.loc?.split(',')[0]}</span>
-                        <span className="text-[10px] font-black text-blue-400">₹{t.price}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </main>
-
-      <ProfileModal 
-        showProfileDetails={showProfileDetails} setShowProfileDetails={setShowProfileDetails} 
-        user={user} viewMode={viewMode} loadData={loadData} liveCount={liveCount}
-        tours={tours} favorites={favorites} isDeleteAdmin={isDeleteAdmin} trashCount={trashCount} 
-      />
-
-      <DeleteConfirmModal isOpen={!!itemToDelete} onClose={() => setItemToDelete(null)} onConfirm={() => handleExecuteAction('delete', itemToDelete.id, itemToDelete.name)} itemName={itemToDelete?.name} />
-      <RestoreConfirmModal isOpen={!!itemToRestore} onClose={() => setItemToRestore(null)} onConfirm={() => handleExecuteAction('restore', itemToRestore.id, itemToRestore.name)} itemName={itemToRestore?.name} />
-      <PermDeleteModal isOpen={!!itemToPermDelete} onClose={() => setItemToPermDelete(null)} onConfirm={() => handleExecuteAction('permanentDelete', itemToPermDelete.id, itemToPermDelete.name)} itemName={itemToPermDelete?.name}/>
-
-      {globalActionLoading && <CloudActionLoader />}
-
-      <BottomNav viewMode={viewMode} loadData={loadData} user={user} setShowProfileDetails={setShowProfileDetails} />
-    </div>
-  );
-};
-
-export default Home;
